@@ -1,6 +1,6 @@
 blueprint:
-  name: "Dehumidifier Control (Solar-Powered)"
-  description: "Guaranteed working version for HA 2024.12"
+  name: "Dehumidifier Control (Simple Solar Surplus)"
+  description: "Uses only PV - Home Consumption for reliable surplus detection"
   domain: automation
   input:
     humidity_sensor:
@@ -10,12 +10,17 @@ blueprint:
           domain: sensor
           device_class: humidity
     dehumidifier:
-      name: "Dehumidifier Entity"
+      name: "Dehumidifier Switch"
       selector:
         entity:
           domain: switch
-    solar_sensor:
-      name: "Solar Production Sensor"
+    pv_production:
+      name: "PV Production Sensor (W)"
+      selector:
+        entity:
+          domain: sensor
+    home_consumption:
+      name: "Home Consumption Sensor (W)"
       selector:
         entity:
           domain: sensor
@@ -27,7 +32,6 @@ blueprint:
           min: 30
           max: 80
           step: 1
-          mode: box
     max_humidity:
       name: "Deactivate Below (%)"
       default: 45
@@ -36,36 +40,36 @@ blueprint:
           min: 30
           max: 80
           step: 1
-          mode: box
-    min_solar:
-      name: "Minimum Solar (W)"
+    min_surplus:
+      name: "Minimum Surplus (W)"
       default: 200
       selector:
         number:
           min: 0
           max: 3000
           step: 50
-          mode: box
 
 trigger:
   - platform: state
-    entity_id: !input humidity_sensor
-    attribute: state
+    entity_id:
+      - !input humidity_sensor
+      - !input pv_production
+      - !input home_consumption
+    for: "00:05:00"  # Wait for stable values
 
 condition:
-  - condition: and
-    conditions:
-      - condition: template
-        value_template: >-
-          {{ float(states(input.humidity_sensor)) > float(input.min_humidity) }}
-      - condition: template
-        value_template: >-
-          {{ float(states(input.solar_sensor)) >= float(input.min_solar) }}
+  - condition: template
+    value_template: >-
+      {% set hum = states(input.humidity_sensor)|float(0) %}
+      {% set pv = states(input.pv_production)|float(0) %}
+      {% set home = states(input.home_consumption)|float(0) %}
+      {{ (hum > input.min_humidity) and ((pv - home) >= input.min_surplus) }}
 
 action:
   - service: switch.turn_on
     target:
       entity_id: !input dehumidifier
+  - delay: "00:30:00"  # Minimum runtime
   - wait_for_trigger:
       - platform: template
         value_template: >-
