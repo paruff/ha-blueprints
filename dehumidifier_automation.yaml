@@ -1,88 +1,57 @@
 blueprint:
-  name: "Smart Dehumidifier Control (Solar-Powered)"
-  description: "Automates dehumidifiers based on humidity, solar surplus, and season."
+  name: "Dehumidifier Control (No Templates)"
+  description: "Simplified humidity control without Jinja2 templates."
   domain: automation
   input:
-    ikea_humidity_sensor:
-      name: "IKEA Air Quality Sensor (Humidity)"
+    humidity_sensor:
+      name: "Humidity Sensor"
       selector:
         entity:
           domain: sensor
           device_class: humidity
-    dehumidifier_switch:
+    dehumidifier:
       name: "Dehumidifier Switch"
       selector:
         entity:
           domain: switch
-    solar_production_sensor:
-      name: "Solar Production Sensor"
-      selector:
-        entity:
-          domain: sensor
     min_humidity:
-      name: "Minimum Humidity Threshold (%)"
+      name: "Activate Above (%)"
       default: 55
       selector:
         number:
           min: 30
-          max: 70
+          max: 80
           step: 5
     max_humidity:
-      name: "Maximum Humidity Threshold (%)"
+      name: "Deactivate Below (%)"
       default: 45
       selector:
         number:
           min: 30
-          max: 70
+          max: 80
           step: 5
-    solar_threshold:
-      name: "Minimum Solar Power to Run (W)"
-      default: 200
-      selector:
-        number:
-          min: 0
-          max: 1000
-          step: 50
 
 trigger:
   - platform: numeric_state
-    entity_id: !input ikea_humidity_sensor
-    above: !input min_humidity
+    entity_id: input.humidity_sensor
+    above: input.min_humidity
     for:
-      minutes: 15  # Prevent rapid cycling
+      minutes: 10  # Prevents rapid cycling
 
 condition:
-  - condition: and
-    conditions:
-      - condition: numeric_state
-        entity_id: !input solar_production_sensor
-        above: !input solar_threshold
-      - condition: template
-        value_template: >
-          {% if now().month in [11,12,1,2] %}  # Winter mode
-            {{ states(!input ikea_humidity_sensor) | float > !input min_humidity + 5 }}
-          {% else %}  # Summer mode
-            {{ states(!input ikea_humidity_sensor) | float > !input min_humidity }}
-          {% endif %}
+  - condition: numeric_state
+    entity_id: input.humidity_sensor
+    above: input.min_humidity  # Re-check in case value changed
 
 action:
-  - choose:
-      - conditions:
-          - condition: numeric_state
-            entity_id: !input ikea_humidity_sensor
-            above: !input min_humidity
-        sequence:
-          - service: switch.turn_on
-            target:
-              entity_id: !input dehumidifier_switch
-          - delay: "00:30:00"  # Run for 30 mins minimum
-          - wait_for_trigger:
-              - platform: numeric_state
-                entity_id: !input ikea_humidity_sensor
-                below: !input max_humidity
-            timeout: "02:00:00"  # Max runtime if humidity persists
-            continue_on_timeout: false
-          - service: switch.turn_off
-            target:
-              entity_id: !input dehumidifier_switch
-    default: []
+  - service: switch.turn_on
+    target:
+      entity_id: input.dehumidifier
+  - wait_for_trigger:
+      - platform: numeric_state
+        entity_id: input.humidity_sensor
+        below: input.max_humidity
+    timeout: "02:00:00"  # Max runtime
+  - service: switch.turn_off
+    target:
+      entity_id: input.dehumidifier
