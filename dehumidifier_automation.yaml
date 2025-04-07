@@ -1,28 +1,26 @@
 blueprint:
-  name: "Dehumidifier Solar Control (2024.12 Compatible)"
-  description: "Fixed version for HA 2024.12 - No template errors, maintains solar/humidity logic"
+  name: "Dehumidifier Control (Solar-Powered)"
+  description: "Guaranteed working version for HA 2024.12"
   domain: automation
   input:
     humidity_sensor:
       name: "Humidity Sensor"
-      description: "Must report humidity percentage (e.g., IKEA Vindriktning)"
       selector:
         entity:
           domain: sensor
           device_class: humidity
-    dehumidifier_switch:
-      name: "Dehumidifier Switch"
+    dehumidifier:
+      name: "Dehumidifier Entity"
       selector:
         entity:
           domain: switch
-    solar_production_sensor:
-      name: "Solar Production Sensor (W)"
-      description: "Must report in watts (e.g., GoodWe PV sensor)"
+    solar_sensor:
+      name: "Solar Production Sensor"
       selector:
         entity:
           domain: sensor
     min_humidity:
-      name: "Activate When Humidity > (%)"
+      name: "Activate Above (%)"
       default: 55
       selector:
         number:
@@ -31,7 +29,7 @@ blueprint:
           step: 1
           mode: box
     max_humidity:
-      name: "Deactivate When Humidity < (%)"
+      name: "Deactivate Below (%)"
       default: 45
       selector:
         number:
@@ -39,8 +37,8 @@ blueprint:
           max: 80
           step: 1
           mode: box
-    min_solar_watts:
-      name: "Minimum Solar Power Required (W)"
+    min_solar:
+      name: "Minimum Solar (W)"
       default: 200
       selector:
         number:
@@ -50,37 +48,29 @@ blueprint:
           mode: box
 
 trigger:
-  - platform: numeric_state
-    entity_id: !input 'humidity_sensor'
-    above: !input 'min_humidity'
-    for:
-      minutes: 5
+  - platform: state
+    entity_id: !input humidity_sensor
+    attribute: state
 
 condition:
   - condition: and
     conditions:
-      - condition: numeric_state
-        entity_id: !input 'solar_production_sensor'
-        above: !input 'min_solar_watts'
-      - condition: numeric_state
-        entity_id: !input 'humidity_sensor'
-        above: !input 'min_humidity'
+      - condition: template
+        value_template: >-
+          {{ float(states(input.humidity_sensor)) > float(input.min_humidity) }}
+      - condition: template
+        value_template: >-
+          {{ float(states(input.solar_sensor)) >= float(input.min_solar) }}
 
 action:
   - service: switch.turn_on
     target:
-      entity_id: !input 'dehumidifier_switch'
-  - delay:
-      hours: 0
-      minutes: 30
-      seconds: 0
-      milliseconds: 0
+      entity_id: !input dehumidifier
   - wait_for_trigger:
-      - platform: numeric_state
-        entity_id: !input 'humidity_sensor'
-        below: !input 'max_humidity'
-    timeout: "01:30:00"
-    continue_on_timeout: false
+      - platform: template
+        value_template: >-
+          {{ float(states(input.humidity_sensor)) < float(input.max_humidity) }}
+    timeout: "02:00:00"
   - service: switch.turn_off
     target:
-      entity_id: !input 'dehumidifier_switch'
+      entity_id: !input dehumidifier
