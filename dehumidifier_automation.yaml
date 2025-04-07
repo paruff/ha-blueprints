@@ -1,6 +1,6 @@
 blueprint:
-  name: "Dehumidifier Control (No Templates)"
-  description: "Simplified humidity control without Jinja2 templates."
+  name: "Dehumidifier Control with Solar Logic"
+  description: "Humidity + solar-powered control without template errors."
   domain: automation
   input:
     humidity_sensor:
@@ -14,6 +14,11 @@ blueprint:
       selector:
         entity:
           domain: switch
+    solar_production:
+      name: "Solar Production Sensor (W)"
+      selector:
+        entity:
+          domain: sensor
     min_humidity:
       name: "Activate Above (%)"
       default: 55
@@ -30,18 +35,31 @@ blueprint:
           min: 30
           max: 80
           step: 5
+    min_solar:
+      name: "Min Solar to Run (W)"
+      default: 200
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 50
 
 trigger:
   - platform: numeric_state
     entity_id: input.humidity_sensor
     above: input.min_humidity
     for:
-      minutes: 10  # Prevents rapid cycling
+      minutes: 10  # Anti-short-cycling
 
 condition:
-  - condition: numeric_state
-    entity_id: input.humidity_sensor
-    above: input.min_humidity  # Re-check in case value changed
+  - condition: and
+    conditions:
+      - condition: numeric_state
+        entity_id: input.humidity_sensor
+        above: input.min_humidity
+      - condition: numeric_state
+        entity_id: input.solar_production
+        above: input.min_solar
 
 action:
   - service: switch.turn_on
