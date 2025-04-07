@@ -1,0 +1,108 @@
+blueprint:
+  name: "Tesla Solar-Powered Charging (GoodWe + Battery)"
+  description: "Automatically charges Tesla only during solar surplus, with battery/grid fallbacks."
+  domain: automation
+  input:
+    tesla_charger_entity:
+      name: "Tesla Charger Entity"
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: plug
+    solar_production_sensor:
+      name: "Solar Production Sensor"
+      selector:
+        entity:
+          domain: sensor
+    battery_soc_sensor:
+      name: "Battery State of Charge Sensor"
+      selector:
+        entity:
+          domain: sensor
+    grid_import_sensor:
+      name: "Grid Import Power Sensor"
+      selector:
+        entity:
+          domain: sensor
+    min_solar_surplus:
+      name: "Minimum Solar Surplus (W)"
+      default: 4000
+      selector:
+        number:
+          min: 1000
+          max: 10000
+          step: 500
+    min_battery_soc:
+      name: "Minimum Battery SOC (%)"
+      default: 80
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+    max_grid_import:
+      name: "Max Grid Import Allowed (W)"
+      default: 500
+      selector:
+        number:
+          min: 0
+          max: 2000
+          step: 100
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input solar_production_sensor
+    above: !input min_solar_surplus
+  - platform: numeric_state
+    entity_id: !input grid_import_sensor
+    above: !input max_grid_import
+    for:
+      minutes: 5
+
+condition:
+  - condition: and
+    conditions:
+      - condition: state
+        entity_id: !input tesla_charger_entity
+        state: "on"
+      - condition: numeric_state
+        entity_id: !input battery_soc_sensor
+        above: !input min_battery_soc
+      - condition: template
+        value_template: >
+          {{ (states(!input.solar_production_sensor) | float - 
+             states(!input.grid_import_sensor) | float ) > !input.min_solar_surplus }}
+
+action:
+  - choose:
+      - conditions:
+          - condition: numeric_state
+            entity_id: !input solar_production_sensor
+            above: !input min_solar_surplus
+        sequence:
+          - service: notify.mobile_app
+            data:
+              message: "⚡ Charging Tesla (Solar surplus: {{ states(!input.solar_production_sensor) }}W)"
+          - service: tesla.start_charging
+            target:
+              entity_id: !input tesla_charger_entity
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.tesla_charge_amps
+            data:
+              value: >
+                {% set surplus = states(!input.solar_production_sensor) | float %}
+                {{ [16, (surplus / 230) | round(0)] | min }}  # 230V assumed
+
+      - conditions:
+          - condition: numeric_state
+            entity_id: !input grid_import_sensor
+            above: !input max_grid_import
+        sequence:
+          - service: notify.mobile_app
+            data:
+              message: "⚠️ Stopping Tesla charging (Grid import: {{ states(!input.grid_import_sensor) }}W)"
+          - service: tesla.stop_charging
+            target:
+              entity_id: !input tesla_charger_entity
+    default: []
