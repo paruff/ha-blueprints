@@ -76,7 +76,7 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ is_state(charging_mode, 'Surplus Only (PV+Battery)') }}"
+            value_template: "{{ is_state('input_select.charging_mode', 'Surplus Only (PV+Battery)') }}"
         sequence:
           - service: variable.set_variable
             data:
@@ -86,9 +86,9 @@ action:
               - conditions:
                   - condition: template
                     value_template: >
-                      {{ (states(solar_production) | float(0) - states(house_consumption) | float(0) > 3000) or
-                         (states(solar_forecast) | float(0) > 5 and
-                          states(battery_soc) | float(0) >= 75) }}
+                      {{ (states('sensor.solar_production') | float(0) - states('sensor.house_consumption') | float(0) > 3000) or
+                         (states('sensor.solar_forecast') | float(0) > 5 and
+                          states('sensor.battery_soc') | float(0) >= 75) }}
                 sequence:
                   - service: tesla.start_charging
                     target:
@@ -97,17 +97,17 @@ action:
                     data:
                       message: >
                         ⚡ Charging STARTED (Mode: Surplus).
-                        Solar: {{ states(solar_production) }}W →
-                        House Consumption: {{ states(house_consumption) }}W →
-                        Surplus: {{ states(solar_production) | float(0) - states(house_consumption) | float(0) }}W →
-                        Forecast: {{ states(solar_forecast) }}kWh
+                        Solar: {{ states('sensor.solar_production') }}W →
+                        House Consumption: {{ states('sensor.house_consumption') }}W →
+                        Surplus: {{ states('sensor.solar_production') | float(0) - states('sensor.house_consumption') | float(0) }}W →
+                        Forecast: {{ states('sensor.solar_forecast') }}kWh
               default:
                 - service: tesla.stop_charging
                   target:
                     entity_id: !input tesla_charger
       - conditions:
           - condition: template
-            value_template: "{{ is_state(charging_mode, 'Trip Prep (Charge to X%)') }}"
+            value_template: "{{ is_state('input_select.charging_mode', 'Trip Prep (Charge to X%)') }}"
         sequence:
           - service: variable.set_variable
             data:
@@ -117,7 +117,7 @@ action:
               - conditions:
                   - condition: template
                     value_template: >
-                      {{ states('sensor.tesla_battery_level') | float(0) < !input trip_soc_target }}
+                      {{ states('sensor.tesla_battery_level') | float(0) < (input.trip_soc_target | float(0)) }}
                 sequence:
                   - service: tesla.start_charging
                     target:
@@ -125,11 +125,11 @@ action:
                   - service: notify.mobile_app
                     data:
                       message: >
-                        🚗 Charging to {{ !input trip_soc_target }}% (Trip Prep Mode).
+                        🚗 Charging to {{ input.trip_soc_target }}% (Trip Prep Mode).
                         Current: {{ states('sensor.tesla_battery_level') }}%
       - conditions:
           - condition: template
-            value_template: "{{ is_state(charging_mode, 'Stop (No Charging)') }}"
+            value_template: "{{ is_state('input_select.charging_mode', 'Stop (No Charging)') }}"
         sequence:
           - service: tesla.stop_charging
             target:
@@ -138,4 +138,4 @@ action:
             data:
               entity_id: var.ev_charge_policy
               value: "Stopped"
-  default: []
+default: []
