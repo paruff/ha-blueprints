@@ -77,9 +77,25 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ is_state('!input.charging_mode', 'Surplus Only (PV+Battery)') }}"
+            value_template: "{{ is_state(!input.charging_mode, 'Surplus Only (PV+Battery)') }}"
         sequence:
           - service: variable.set_variable
             data:
-              entity_id
+              entity_id: var.ev_charge_policy
+              value: "Surplus"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ (states(!input.solar_production) | float(0) - states(!input.house_consumption) | float(0) > 3000) or
+                         (states(!input.solar_forecast) | float(0) > 5 and
+                          states(!input.battery_soc) | float(0) >= 75) }}
+                sequence:
+                  - service: tesla.start_charging
+                    target:
+                      entity_id: !input tesla_charger
+                  - service: notify.mobile_app
+                    data:
+                      message: >
+                        ⚡ Charging STARTED
 
