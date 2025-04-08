@@ -1,108 +1,144 @@
 blueprint:
-  name: "Tesla Solar-Powered Charging (GoodWe + Battery)"
-  description: "Automatically charges Tesla only during solar surplus, with battery/grid fallbacks."
+  name: "Tesla Solar Charging w/ Forecast & Modes (GoodWe)"
+  description: "Smart charging with solar forecasts, multiple modes, and battery protection."
   domain: automation
   input:
-    tesla_charger_entity:
+    # Required Entities
+    tesla_charger:
       name: "Tesla Charger Entity"
       selector:
         entity:
           domain: binary_sensor
           device_class: plug
-    solar_production_sensor:
+    solar_production:
       name: "Solar Production Sensor"
       selector:
         entity:
           domain: sensor
-    battery_soc_sensor:
-      name: "Battery State of Charge Sensor"
+    battery_soc:
+      name: "Battery SOC Sensor"
       selector:
         entity:
           domain: sensor
-    grid_import_sensor:
-      name: "Grid Import Power Sensor"
+    grid_import:
+      name: "Grid Import Sensor"
       selector:
         entity:
           domain: sensor
-    min_solar_surplus:
-      name: "Minimum Solar Surplus (W)"
-      default: 4000
+
+    # Forecast Integration (Solcast/OpenWeather)
+    solar_forecast:
+      name: "Solar Forecast Sensor"
+      selector:
+        entity:
+          domain: sensor
+      description: "e.g., solcast.total_kwh_forecast_today"
+
+    # User-Selectable Mode
+    charging_mode:
+      name: "Charging Mode"
+      selector:
+        select:
+          options:
+            - "Surplus Only (PV+Battery)"
+            - "Trip Prep (Charge to X%)"
+            - "Stop (No Charging)"
+          mode: dropdown
+      default: "Surplus Only (PV+Battery)"
+
+    # Thresholds
+    trip_soc_target:
+      name: "Trip SOC Target (%)"
+      default: 90
       selector:
         number:
-          min: 1000
-          max: 10000
-          step: 500
-    min_battery_soc:
-      name: "Minimum Battery SOC (%)"
-      default: 80
-      selector:
-        number:
-          min: 10
+          min: 50
           max: 100
           step: 5
-    max_grid_import:
-      name: "Max Grid Import Allowed (W)"
-      default: 500
-      selector:
-        number:
-          min: 0
-          max: 2000
-          step: 100
+      description: "Only used in 'Trip Prep' mode"
 
 trigger:
-  - platform: numeric_state
-    entity_id: !input solar_production_sensor
-    above: !input min_solar_surplus
-  - platform: numeric_state
-    entity_id: !input grid_import_sensor
-    above: !input max_grid_import
-    for:
-      minutes: 5
+  # Re-evaluate every 15 mins or when solar/forecast changes
+  - platform: time_pattern
+    minutes: "/15"
+  - platform: state
+    entity_id: !input solar_forecast
+  - platform: state
+    entity_id: !input solar_production
 
 condition:
-  - condition: and
-    conditions:
-      - condition: state
-        entity_id: !input tesla_charger_entity
-        state: "on"
-      - condition: numeric_state
-        entity_id: !input battery_soc_sensor
-        above: !input min_battery_soc
-      - condition: template
-        value_template: >
-          {{ (states(!input.solar_production_sensor) | float - 
-             states(!input.grid_import_sensor) | float ) > !input.min_solar_surplus }}
+  # Only run if Tesla is plugged in
+  - condition: state
+    entity_id: !input tesla_charger
+    state: "on"
 
 action:
   - choose:
+      # MODE 1: Surplus Only (Default)
       - conditions:
-          - condition: numeric_state
-            entity_id: !input solar_production_sensor
-            above: !input min_solar_surplus
+          - condition: template
+            value_template: "{{ charging_mode == 'Surplus Only (PV+Battery)' }}"
         sequence:
-          - service: notify.mobile_app
+          - service: variable.set_variable
             data:
-              message: "⚡ Charging Tesla (Solar surplus: {{ states(!input.solar_production_sensor) }}W)"
-          - service: tesla.start_charging
-            target:
-              entity_id: !input tesla_charger_entity
-          - service: input_number.set_value
-            target:
-              entity_id: input_number.tesla_charge_amps
-            data:
-              value: >
-                {% set surplus = states(!input.solar_production_sensor) | float %}
-                {{ [16, (surplus / 230) | round(0)] | min }}  # 230V assumed
+              entity_id: var.ev_charge_policy
+              value: "Surplus"
+          - if:
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: >
+                      {{ (states(!input.solar_production) | float > 3000 or
+                         (states(!input.solar_forecast) | float > 5) and
+                         states(!input.battery_soc) | float >= 75 }}
+              then:
+                  - service: tesla.start_charging
+                    target:
+                      entity_id: !input tesla_charger
+                  - service: notify.mobile_app
+                    data:
+                      message: >
+                        ⚡ Charging STARTED (Mode: Surplus).
+                        Solar: {{ states(!input.solar_production) }}W →
+                        Forecast: {{ states(!input.solar_forecast) }}kWh
+              else:
+                  - service: tesla.stop_charging
+                    target:
+                      entity_id: !input tesla_charger
 
+      # MODE 2: Trip Prep (Charge to X%)
       - conditions:
-          - condition: numeric_state
-            entity_id: !input grid_import_sensor
-            above: !input max_grid_import
+          - condition: template
+            value_template: "{{ charging_mode == 'Trip Prep (Charge to X%)' }}"
         sequence:
-          - service: notify.mobile_app
+          - service: variable.set_variable
             data:
-              message: "⚠️ Stopping Tesla charging (Grid import: {{ states(!input.grid_import_sensor) }}W)"
+              entity_id: var.ev_charge_policy
+              value: "TripPrep"
+          - if:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.tesla_battery_level') | float < !input trip_soc_target }}
+            then:
+                - service: tesla.start_charging
+                  target:
+                    entity_id: !input tesla_charger
+                - service: notify.mobile_app
+                  data:
+                    message: >
+                      🚗 Charging to {{ !input trip_soc_target }}% (Trip Prep Mode).
+                      Current: {{ states('sensor.tesla_battery_level') }}%
+
+      # MODE 3: Stop All Charging
+      - conditions:
+          - condition: template
+            value_template: "{{ charging_mode == 'Stop (No Charging)' }}"
+        sequence:
           - service: tesla.stop_charging
             target:
-              entity_id: !input tesla_charger_entity
+              entity_id: !input tesla_charger
+          - service: variable.set_variable
+            data:
+              entity_id: var.ev_charge_policy
+              value: "Stopped"
     default: []
