@@ -99,5 +99,26 @@ action:
                   message: >
                     ⚡ Charging STARTED (Mode: Surplus).
                     Solar: {{ states(!input.solar_production) }}W →
-                    House Consumption: {{ states(!input.house_consumption
+                    House Consumption: {{ states(!input.house_consumption) }}W →
+                    Surplus: {{ states(!input.solar_production) | float(0) - states(!input.house_consumption) | float(0) }}W →
+                    Forecast: {{ states(!input.solar_forecast) }}kWh
+            else:
+              - service: tesla.stop_charging
+                target:
+                  entity_id: !input tesla_charger
+      # MODE 2: Trip Prep (Charge to X%)
+      - conditions:
+          - condition: template
+            value_template: "{{ charging_mode == 'Trip Prep (Charge to X%)' }}"
+        sequence:
+          - service: variable.set_variable
+            data:
+              entity_id: var.ev_charge_policy
+              value: "TripPrep"
+          - if:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.tesla_battery_level') | float(0) < !input trip_soc_target }}
+            then:
+              -
 
