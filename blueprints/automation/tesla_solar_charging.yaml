@@ -15,6 +15,11 @@ blueprint:
       selector:
         entity:
           domain: sensor
+    house_consumption:
+      name: "House Consumption Sensor"
+      selector:
+        entity:
+          domain: sensor
     battery_soc:
       name: "Battery SOC Sensor"
       selector:
@@ -25,7 +30,6 @@ blueprint:
       selector:
         entity:
           domain: sensor
-
     # Forecast Integration (Solcast/OpenWeather)
     solar_forecast:
       name: "Solar Forecast Sensor"
@@ -33,7 +37,6 @@ blueprint:
         entity:
           domain: sensor
       description: "e.g., solcast.total_kwh_forecast_today"
-
     # User-Selectable Mode
     charging_mode:
       name: "Charging Mode"
@@ -45,7 +48,6 @@ blueprint:
             - "Stop (No Charging)"
           mode: dropdown
       default: "Surplus Only (PV+Battery)"
-
     # Thresholds
     trip_soc_target:
       name: "Trip SOC Target (%)"
@@ -56,7 +58,6 @@ blueprint:
           max: 100
           step: 5
       description: "Only used in 'Trip Prep' mode"
-
 trigger:
   # Re-evaluate every 15 mins or when solar/forecast changes
   - platform: time_pattern
@@ -65,13 +66,13 @@ trigger:
     entity_id: !input solar_forecast
   - platform: state
     entity_id: !input solar_production
-
+  - platform: state
+    entity_id: !input house_consumption
 condition:
   # Only run if Tesla is plugged in
   - condition: state
     entity_id: !input tesla_charger
     state: "on"
-
 action:
   - choose:
       # MODE 1: Surplus Only (Default)
@@ -84,13 +85,11 @@ action:
               entity_id: var.ev_charge_policy
               value: "Surplus"
           - if:
-              - condition: and
-                conditions:
-                  - condition: template
-                    value_template: >
-                      {{ (states(!input.solar_production) | float > 3000) or
-                         (states(!input.solar_forecast) | float > 5) and
-                         (states(!input.battery_soc) | float >= 75) }}
+              - condition: template
+                value_template: >
+                  {{ (states(!input.solar_production) | float(0) - states(!input.house_consumption) | float(0) > 3000) or
+                     (states(!input.solar_forecast) | float(0) > 5 and
+                      states(!input.battery_soc) | float(0) >= 75) }}
             then:
               - service: tesla.start_charging
                 target:
@@ -100,45 +99,5 @@ action:
                   message: >
                     ⚡ Charging STARTED (Mode: Surplus).
                     Solar: {{ states(!input.solar_production) }}W →
-                    Forecast: {{ states(!input.solar_forecast) }}kWh
-            else:
-              - service: tesla.stop_charging
-                target:
-                  entity_id: !input tesla_charger
-
-      # MODE 2: Trip Prep (Charge to X%)
-      - conditions:
-          - condition: template
-            value_template: "{{ charging_mode == 'Trip Prep (Charge to X%)' }}"
-        sequence:
-          - service: variable.set_variable
-            data:
-              entity_id: var.ev_charge_policy
-              value: "TripPrep"
-          - if:
-              - condition: template
-                value_template: >
-                  {{ states('sensor.tesla_battery_level') | float < !input trip_soc_target }}
-            then:
-              - service: tesla.start_charging
-                target:
-                  entity_id: !input tesla_charger
-              - service: notify.mobile_app
-                data:
-                  message: >
-                    🚗 Charging to {{ !input trip_soc_target }}% (Trip Prep Mode).
-                    Current: {{ states('sensor.tesla_battery_level') }}%
-
-      # MODE 3: Stop All Charging
-      - conditions:
-          - condition: template
-            value_template: "{{ charging_mode == 'Stop (No Charging)' }}"
-        sequence:
-          - service: tesla.stop_charging
-            target:
-              entity_id: !input tesla_charger
-          - service: variable.set_variable
-            data:
-              entity_id: var.ev_charge_policy
-              value: "Stopped"
-    default: []
+                    House Consumption: {{ states(!input.house_consumption
+
