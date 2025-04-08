@@ -88,23 +88,23 @@ action:
                 conditions:
                   - condition: template
                     value_template: >
-                      {{ (states(!input.solar_production) | float > 3000 or
+                      {{ (states(!input.solar_production) | float > 3000) or
                          (states(!input.solar_forecast) | float > 5) and
-                         states(!input.battery_soc) | float >= 75 }}
-              then:
-                  - service: tesla.start_charging
-                    target:
-                      entity_id: !input tesla_charger
-                  - service: notify.mobile_app
-                    data:
-                      message: >
-                        ⚡ Charging STARTED (Mode: Surplus).
-                        Solar: {{ states(!input.solar_production) }}W →
-                        Forecast: {{ states(!input.solar_forecast) }}kWh
-              else:
-                  - service: tesla.stop_charging
-                    target:
-                      entity_id: !input tesla_charger
+                         (states(!input.battery_soc) | float >= 75) }}
+            then:
+              - service: tesla.start_charging
+                target:
+                  entity_id: !input tesla_charger
+              - service: notify.mobile_app
+                data:
+                  message: >
+                    ⚡ Charging STARTED (Mode: Surplus).
+                    Solar: {{ states(!input.solar_production) }}W →
+                    Forecast: {{ states(!input.solar_forecast) }}kWh
+            else:
+              - service: tesla.stop_charging
+                target:
+                  entity_id: !input tesla_charger
 
       # MODE 2: Trip Prep (Charge to X%)
       - conditions:
@@ -120,14 +120,14 @@ action:
                 value_template: >
                   {{ states('sensor.tesla_battery_level') | float < !input trip_soc_target }}
             then:
-                - service: tesla.start_charging
-                  target:
-                    entity_id: !input tesla_charger
-                - service: notify.mobile_app
-                  data:
-                    message: >
-                      🚗 Charging to {{ !input trip_soc_target }}% (Trip Prep Mode).
-                      Current: {{ states('sensor.tesla_battery_level') }}%
+              - service: tesla.start_charging
+                target:
+                  entity_id: !input tesla_charger
+              - service: notify.mobile_app
+                data:
+                  message: >
+                    🚗 Charging to {{ !input trip_soc_target }}% (Trip Prep Mode).
+                    Current: {{ states('sensor.tesla_battery_level') }}%
 
       # MODE 3: Stop All Charging
       - conditions:
