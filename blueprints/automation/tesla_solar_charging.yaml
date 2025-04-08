@@ -127,6 +127,7 @@ action:
                       message: >
                         🚗 Charging to {{ input.trip_soc_target }}% (Trip Prep Mode).
                         Current: {{ states('sensor.tesla_battery_level') }}%
+              default: []
       - conditions:
           - condition: template
             value_template: "{{ is_state('input_select.charging_mode', 'Stop (No Charging)') }}"
@@ -138,4 +139,4 @@ action:
             data:
               entity_id: var.ev_charge_policy
               value: "Stopped"
-default: []
+  default: []
