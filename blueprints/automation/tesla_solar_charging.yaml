@@ -46,7 +46,6 @@ blueprint:
             - "Surplus Only (PV+Battery)"
             - "Trip Prep (Charge to X%)"
             - "Stop (No Charging)"
-          mode: dropdown
       default: "Surplus Only (PV+Battery)"
     # Thresholds
     trip_soc_target:
@@ -77,7 +76,7 @@ action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ is_state(!input.charging_mode, 'Surplus Only (PV+Battery)') }}"
+            value_template: "{{ is_state_attr('input_select.charging_mode', 'state', 'Surplus Only (PV+Battery)') }}"
         sequence:
           - service: variable.set_variable
             data:
@@ -87,9 +86,9 @@ action:
               - conditions:
                   - condition: template
                     value_template: >
-                      {{ (states(!input.solar_production) | float(0) - states(!input.house_consumption) | float(0) > 3000) or
-                         (states(!input.solar_forecast) | float(0) > 5 and
-                          states(!input.battery_soc) | float(0) >= 75) }}
+                      {{ (states('!input.solar_production') | float(0) - states('!input.house_consumption') | float(0) > 3000) or
+                         (states('!input.solar_forecast') | float(0) > 5 and
+                          states('!input.battery_soc') | float(0) >= 75) }}
                 sequence:
                   - service: tesla.start_charging
                     target:
@@ -97,5 +96,10 @@ action:
                   - service: notify.mobile_app
                     data:
                       message: >
-                        ⚡ Charging STARTED
+                        ⚡ Charging STARTED (Mode: Surplus).
+                        Solar: {{ states('!input.solar_production') }}W →
+                        House Consumption: {{ states('!input.house_consumption') }}W →
+                        Surplus: {{ states('!input.solar_production') | float(0) - states('!input.house_consumption') | float(0) }}W →
+                        Forecast: {{ states('!input.solar_forecast') }}kWh
+
 
